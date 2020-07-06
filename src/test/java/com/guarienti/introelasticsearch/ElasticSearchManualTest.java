@@ -15,6 +15,7 @@ import org.springframework.data.elasticsearch.core.SearchHits;
 import org.springframework.data.elasticsearch.core.query.NativeSearchQueryBuilder;
 
 import static java.util.Arrays.asList;
+import static org.elasticsearch.index.query.QueryBuilders.fuzzyQuery;
 import static org.elasticsearch.index.query.QueryBuilders.regexpQuery;
 import static org.springframework.test.util.AssertionErrors.assertEquals;
 import static org.springframework.test.util.AssertionErrors.assertNotNull;
@@ -59,23 +60,53 @@ public class ElasticSearchManualTest {
 
     @Test
     public void givenPersistedArticles_whenSearchByAuthorsName_thenRightFound(){
-        final Page<Article> articleByAuthorName = articleRepository.findByAuthorsName(johnDoe.getName(), PageRequest.of(0, 10));
+        Page<Article> articleByAuthorName = articleRepository.findByAuthorsName(johnDoe.getName(), PageRequest.of(0, 10));
         assertEquals("Amount of records should be 2", 2L, articleByAuthorName.getTotalElements());
     }
 
     @Test
     public void givenCustomQuery_whenSearchByAuthorsName_thenArticleIsFound(){
-        final Page<Article> articleByAuthorName = articleRepository.findByAuthorsNameUsingCustomQuery(johnDoe.getName(), PageRequest.of(0, 10));
+        Page<Article> articleByAuthorName = articleRepository.findByAuthorsNameUsingCustomQuery(johnDoe.getName(), PageRequest.of(0, 10));
         assertEquals("Amount of records should be 2", 2L, articleByAuthorName.getTotalElements());
     }
 
     @Test
     public void givenPersistedArticles_whenSearchByRegex_thenArticleIsFound(){
-        final Query searchQuery = new NativeSearchQueryBuilder().withFilter(regexpQuery("title", ".*practice.*"))
+        Query searchQuery = new NativeSearchQueryBuilder().withFilter(regexpQuery("title", ".*practice.*"))
                 .build();
         SearchHits<Article> articles = elasticsearchRestTemplate.search(searchQuery, Article.class, IndexCoordinates.of("blog"));
 
         assertEquals("Amount of records should be 1", 1L, articles.getTotalHits());
+    }
+
+    @Test
+    public void givenSavedDocument_whenTitleUpdated_thenCanBeFoundByUpdatedTitle(){
+        Query searchQuery = new NativeSearchQueryBuilder().withQuery(fuzzyQuery("title", "practice")).build();
+
+        SearchHits<Article> articles = elasticsearchRestTemplate.search(searchQuery, Article.class, IndexCoordinates.of("blog"));
+
+        assertEquals("Amount of records should be 1", 1L, articles.getTotalHits());
+
+        Article article = articles.getSearchHit(0).getContent();
+        String newTitle = "Exciting new project!";
+        article.setTitle(newTitle);
+        articleRepository.save(article);
+
+        assertEquals("Titles should match", newTitle, articleRepository.findById(article.getId()).get().getTitle());
+    }
+
+    @Test
+    public void givenSavedDocument_whenDeleted_thenRemovedFromIndex(){
+        Query searchQuery = new NativeSearchQueryBuilder().withQuery(fuzzyQuery("title", "practice")).build();
+
+        SearchHits<Article> articles = elasticsearchRestTemplate.search(searchQuery, Article.class, IndexCoordinates.of("blog"));
+
+        assertEquals("Amount of records should be 1", 1L, articles.getTotalHits());
+        long count = articleRepository.count();
+
+        articleRepository.delete(articles.getSearchHit(0).getContent());
+
+        assertEquals("Count should be 0", count - 1, articleRepository.count());
     }
 
 }
